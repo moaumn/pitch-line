@@ -841,7 +841,7 @@ export default function App() {
             <div className="desc">{trackB ? trackB.name : '拖拽或点击文件上传，若空则使用原声放音'}</div>
             <input
               type="file"
-              accept="audio/*,video/mp4,video/quicktime,video/*,.m4a"
+              accept="audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/m4a,video/mp4,video/quicktime,.mp3,.wav,.m4a,.mp4,.mov"
               onChange={(e) => setTrackB(e.target.files[0])}
             />
           </div>
