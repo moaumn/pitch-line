@@ -6,11 +6,11 @@ export default function App() {
   const [trackA, setTrackA] = useState(null);
   const [trackB, setTrackB] = useState(null);
   const [loadingText, setLoadingText] = useState(null);
-  
+
   const [playing, setPlaying] = useState(false);
   const [recording, setRecording] = useState(false);
   const [score, setScore] = useState(null);
-  
+
   // Dual training modes
   const [trainingMode, setTrainingMode] = useState('auto'); // 'auto' | 'shadow'
   const [shadowState, setShadowState] = useState('idle'); // 'idle' | 'listening' | 'following' | 'replaying' | 'countdown'
@@ -19,7 +19,7 @@ export default function App() {
   const [countdown, setCountdown] = useState(null);
   const [toastScore, setToastScore] = useState(null);
   const [vocalEnabled, setVocalEnabled] = useState(true); // 是否开启原声音轨 (Vocal Guide Toggle)
-  
+
   const shadowTimerRef = useRef(null);
   const countdownIntervalRef = useRef(null);
   const toastTimerRef = useRef(null);
@@ -30,7 +30,7 @@ export default function App() {
   const savedContourRef = useRef(null);       // 重试前保存的用户音高数据，用于取消恢复
   const shadowStateRef = useRef('idle');       // 给 drawFrame 用的影子状态 ref，避免闭包过期
   const followStartMsRef = useRef(0);          // 跟唱开始的时间戳，用于虚拟播放头
-  
+
   const wavesurferRef = useRef(null);
   const vocalAudioRef = useRef(null);  // 独立的人声 Audio 元素，用于跟读模式同步播放 Track A
   const workerRef = useRef(null);
@@ -39,11 +39,11 @@ export default function App() {
   const micStreamRef = useRef(null);
   const processorRef = useRef(null);
   const renderLoopIdRef = useRef(null);
-  
+
   const globalContourRef = useRef([]);
   const userContourRef = useRef([]);
   const [pitchRange, setPitchRange] = useState({ min: 48, max: 84 });
-  
+
   // 禁用页面右键菜单
   useEffect(() => {
     const block = (e) => e.preventDefault();
@@ -54,25 +54,25 @@ export default function App() {
   useEffect(() => {
     // 使用相对路径以兼容 GitHub Pages 等子目录托管环境 (Use relative path to resolve worker in subfolders)
     workerRef.current = new Worker('worker.js');
-    
+
     workerRef.current.onmessage = (e) => {
       const { type } = e.data;
       console.log('[Main] Worker message:', type);
-      
+
       if (type === 'decode_complete') {
         const contour = Array.from(new Float32Array(e.data.contour));
         globalContourRef.current = contour;
-        
+
         const validPitches = contour.filter(p => p > 0);
         if (validPitches.length > 0) {
           const min = Math.max(36, Math.floor(Math.min(...validPitches) - 3));
           const max = Math.min(96, Math.ceil(Math.max(...validPitches) + 3));
           setPitchRange({ min, max });
         }
-        
+
         setLoadingText(null);
         setStep(2);
-      } 
+      }
       else if (type === 'decode_error') {
         setLoadingText(null);
         alert('解析参考音高失败: ' + (e.data.error || '未知错误'));
@@ -97,7 +97,7 @@ export default function App() {
         }
       }
     };
-    
+
     return () => {
       if (workerRef.current) {
         workerRef.current.terminate();
@@ -108,27 +108,27 @@ export default function App() {
   const handleStartAnalysis = async () => {
     if (!trackA) return;
     setLoadingText('正在读取并解码原唱干声音频...');
-    
+
     try {
       const fileReader = new FileReader();
       fileReader.onload = async (e) => {
         try {
           const arrayBuffer = e.target.result;
           const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-          
+
           setLoadingText('WebAudio 正在对原声音频进行系统级解码...');
           const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-          
+
           setLoadingText('重构并压缩音频字节发送至 Worker 分析...');
           const channelData = audioBuffer.getChannelData(0);
-          
+
           const rawBuffer = channelData.buffer.slice(0);
           workerRef.current.postMessage({
             type: 'decode_pcm',
             pcmBuffer: rawBuffer,
             sampleRate: audioBuffer.sampleRate
           }, [rawBuffer]);
-          
+
           audioCtx.close();
         } catch (err) {
           console.error(err);
@@ -156,15 +156,15 @@ export default function App() {
         height: 28,
         normalize: true
       });
-      
+
       // 伴奏可选：若用户未上传伴奏，加载原唱干声作为放音与同步基准
       const audioFile = trackB || trackA;
       wavesurferRef.current.load(URL.createObjectURL(audioFile));
-      
+
       wavesurferRef.current.on('play', () => setPlaying(true));
       wavesurferRef.current.on('pause', () => setPlaying(false));
       wavesurferRef.current.on('finish', () => handleStopAll());
-      
+
       // 当用户同时上传了伴奏和人声时，创建独立的人声 Audio 元素
       // 跟读模式需要同时播放人声 + 伴奏，wavesurfer 负责伴奏，vocalAudio 负责人声
       // 若只有人声没有伴奏，wavesurfer 本身就在播放人声，无需额外元素
@@ -175,10 +175,10 @@ export default function App() {
       } else {
         vocalAudioRef.current = null;
       }
-      
+
       userContourRef.current = new Array(globalContourRef.current.length).fill(0);
       setScore(null);
-      
+
       return () => {
         if (wavesurferRef.current) {
           wavesurferRef.current.destroy();
@@ -196,26 +196,26 @@ export default function App() {
     if (step === 2 && canvasRef.current) {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
-      
+
       const resizeCanvas = () => {
         const rect = canvas.getBoundingClientRect();
         canvas.width = rect.width * window.devicePixelRatio;
         canvas.height = rect.height * window.devicePixelRatio;
         ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
       };
-      
+
       resizeCanvas();
-      
+
       const drawFrame = () => {
         const width = canvas.width / window.devicePixelRatio;
         const height = canvas.height / window.devicePixelRatio;
-        
+
         ctx.clearRect(0, 0, width, height);
-        
+
         const totalNotes = pitchRange.max - pitchRange.min;
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.lineWidth = 1;
-        
+
         for (let note = pitchRange.min; note <= pitchRange.max; note++) {
           const y = height - ((note - pitchRange.min) / totalNotes) * height;
           ctx.beginPath();
@@ -223,7 +223,7 @@ export default function App() {
           ctx.lineTo(width, y);
           ctx.stroke();
         }
-        
+
         // 跟读模式 following 状态时，使用虚拟播放头从 segmentStart 开始实时滚动
         let currentTime;
         if (shadowStateRef.current === 'following') {
@@ -236,28 +236,28 @@ export default function App() {
         const playheadFrame = currentTime * (16000 / 512);
         const cursorX = width / 3;
         const pxPerFrame = 5;
-        
+
         const getCoords = (frameIndex, midiVal) => {
           const x = cursorX + (frameIndex - playheadFrame) * pxPerFrame;
           const y = height - ((midiVal - pitchRange.min) / totalNotes) * height;
           return { x, y };
         };
-        
+
         const drawCurve = (contour, color, strokeWidth, isGlow) => {
           let inStroke = false;
-          
+
           if (isGlow) {
             ctx.shadowBlur = 10;
             ctx.shadowColor = color;
           } else {
             ctx.shadowBlur = 0;
           }
-          
+
           ctx.strokeStyle = color;
           ctx.lineWidth = strokeWidth;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-          
+
           for (let i = 0; i < contour.length; i++) {
             const pitch = contour[i];
             if (pitch > 0) {
@@ -269,7 +269,7 @@ export default function App() {
                 }
                 continue;
               }
-              
+
               if (!inStroke) {
                 ctx.beginPath();
                 ctx.moveTo(x, y);
@@ -286,60 +286,60 @@ export default function App() {
           }
           if (inStroke) ctx.stroke();
         };
-        
+
         drawCurve(globalContourRef.current, '#f59e0b', 3, true);
         drawCurve(userContourRef.current, '#10b981', 3, false);
-        
+
         // 实时在屏幕播放竖线位置显示当前音高 (Draw current pitch label at the vertical playhead line)
         const frameIdx = Math.floor(playheadFrame);
         if (frameIdx >= 0 && frameIdx < globalContourRef.current.length) {
           const targetMidi = globalContourRef.current[frameIdx];
           const userMidi = userContourRef.current[frameIdx];
-          
+
           ctx.save();
           ctx.font = 'bold 13px Outfit, -apple-system, sans-serif';
-          
+
           // 在竖线左侧显示原唱参考音高 (Target Pitch on the left)
           if (targetMidi && targetMidi > 0) {
             const targetNote = midiToNoteName(targetMidi);
             const targetWidth = ctx.measureText(targetNote).width;
-            
+
             // 半透明底色背景
             ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
             ctx.fillRect(cursorX - targetWidth - 10, 10, targetWidth + 6, 22);
             ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
             ctx.lineWidth = 1;
             ctx.strokeRect(cursorX - targetWidth - 10, 10, targetWidth + 6, 22);
-            
+
             ctx.fillStyle = '#f59e0b';
             ctx.fillText(targetNote, cursorX - targetWidth - 7, 26);
           }
-          
+
           // 在竖线右侧显示用户实时音高 (User Sing Pitch on the right)
           if (userMidi && userMidi > 0) {
             const userNote = midiToNoteName(userMidi);
             const userWidth = ctx.measureText(userNote).width;
-            
+
             // 半透明底色背景
             ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
             ctx.fillRect(cursorX + 4, 10, userWidth + 6, 22);
             ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
             ctx.lineWidth = 1;
             ctx.strokeRect(cursorX + 4, 10, userWidth + 6, 22);
-            
+
             ctx.fillStyle = '#10b981';
             ctx.fillText(userNote, cursorX + 7, 26);
           }
           ctx.restore();
         }
-        
+
         ctx.shadowBlur = 0;
-        
+
         renderLoopIdRef.current = requestAnimationFrame(drawFrame);
       };
-      
+
       renderLoopIdRef.current = requestAnimationFrame(drawFrame);
-      
+
       return () => {
         cancelAnimationFrame(renderLoopIdRef.current);
       };
@@ -348,15 +348,15 @@ export default function App() {
 
   const handleStartRecording = async () => {
     if (!wavesurferRef.current) return;
-    
+
     try {
       userContourRef.current = new Array(globalContourRef.current.length).fill(0);
       await ensureMicReady();
-      
+
       // 同步播放人声音轨
       if (vocalEnabled && vocalAudioRef.current) {
         vocalAudioRef.current.currentTime = 0;
-        vocalAudioRef.current.play().catch(() => {});
+        vocalAudioRef.current.play().catch(() => { });
       }
       wavesurferRef.current.play();
       setRecording(true);
@@ -369,7 +369,7 @@ export default function App() {
 
   const handleTogglePlayPause = () => {
     if (!wavesurferRef.current) return;
-    
+
     if (playing) {
       wavesurferRef.current.pause();
       if (vocalAudioRef.current) {
@@ -379,7 +379,7 @@ export default function App() {
       wavesurferRef.current.play();
       if (vocalEnabled && vocalAudioRef.current) {
         vocalAudioRef.current.currentTime = wavesurferRef.current.getCurrentTime();
-        vocalAudioRef.current.play().catch(() => {});
+        vocalAudioRef.current.play().catch(() => { });
       }
     }
   };
@@ -387,12 +387,12 @@ export default function App() {
   const handleToggleVocal = () => {
     const nextVal = !vocalEnabled;
     setVocalEnabled(nextVal);
-    
+
     if (vocalAudioRef.current) {
       if (nextVal) {
         if (wavesurferRef.current && wavesurferRef.current.isPlaying()) {
           vocalAudioRef.current.currentTime = wavesurferRef.current.getCurrentTime();
-          vocalAudioRef.current.play().catch(() => {});
+          vocalAudioRef.current.play().catch(() => { });
         }
       } else {
         vocalAudioRef.current.pause();
@@ -403,20 +403,20 @@ export default function App() {
   // === Mic Lifecycle Helpers (shared by auto & shadow modes) ===
   const ensureMicReady = async () => {
     if (audioContextRef.current) return; // already running
-    
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     micStreamRef.current = stream;
     workerRef.current.postMessage({ type: 'start_recording' });
-    
+
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     audioContextRef.current = new AudioCtx();
     const nativeSampleRate = audioContextRef.current.sampleRate;
-    
+
     const source = audioContextRef.current.createMediaStreamSource(stream);
     processorRef.current = audioContextRef.current.createScriptProcessor(2048, 1, 1);
     source.connect(processorRef.current);
     processorRef.current.connect(audioContextRef.current.destination);
-    
+
     processorRef.current.onaudioprocess = (e) => {
       const input = e.inputBuffer.getChannelData(0);
       const floatData = new Float32Array(input);
@@ -492,11 +492,11 @@ export default function App() {
     setShadowRecording(false);   // not recording pitch while listening
     shadowStateRef.current = 'listening';
     setShadowState('listening');
-    
+
     // 同步播放人声 + 伴奏
     if (vocalAudioRef.current) {
       vocalAudioRef.current.currentTime = segmentStartRef.current;
-      vocalAudioRef.current.play().catch(() => {});
+      vocalAudioRef.current.play().catch(() => { });
     }
     wavesurferRef.current.play();
   };
@@ -607,7 +607,7 @@ export default function App() {
     }
     if (vocalAudioRef.current) {
       vocalAudioRef.current.currentTime = segmentStartRef.current;
-      vocalAudioRef.current.play().catch(() => {});
+      vocalAudioRef.current.play().catch(() => { });
     }
     shadowStateRef.current = 'replaying';
     setShadowState('replaying');
@@ -662,7 +662,7 @@ export default function App() {
         if (t >= segmentEndRef.current - 0.05) {
           wavesurferRef.current.pause();
           if (vocalAudioRef.current) vocalAudioRef.current.pause();
-          
+
           // 回放结束，进入倒计时
           startCountdown();
           return;
@@ -698,7 +698,7 @@ export default function App() {
     const user = userContourRef.current;
     const startFrame = Math.floor(segmentStartRef.current * (16000 / 512));
     const endFrame = Math.floor(segmentEndRef.current * (16000 / 512));
-    
+
     let voicedFrames = 0;
     let correctFrames = 0;
     for (let i = startFrame; i < endFrame && i < target.length; i++) {
@@ -714,7 +714,7 @@ export default function App() {
     }
 
     const calculated = voicedFrames > 0 ? Math.round((correctFrames / voicedFrames) * 100) : 0;
-    
+
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastScore(calculated);
     toastTimerRef.current = setTimeout(() => {
@@ -738,10 +738,10 @@ export default function App() {
   const calculateScore = () => {
     const target = globalContourRef.current;
     const user = userContourRef.current;
-    
+
     let voicedFrames = 0;
     let correctFrames = 0;
-    
+
     for (let i = 0; i < target.length; i++) {
       if (target[i] > 0) {
         voicedFrames++;
@@ -757,7 +757,7 @@ export default function App() {
         }
       }
     }
-    
+
     if (voicedFrames === 0) return;
     const rawScore = Math.round((correctFrames / voicedFrames) * 100);
     setScore(rawScore);
@@ -773,7 +773,7 @@ export default function App() {
   const renderNoteLabels = () => {
     const notes = [];
     const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    
+
     for (let note = pitchRange.max; note >= pitchRange.min; note--) {
       if (note % 3 === 0) {
         const octave = Math.floor(note / 12) - 1;
@@ -798,11 +798,11 @@ export default function App() {
           <p className="subtitle">H5 极速流式多轨训练版</p>
         </>
       )}
-      
+
       {/* Floating Back Button for Step 2 */}
       {step === 2 && (
-        <button 
-          className="btn-back-floating" 
+        <button
+          className="btn-back-floating"
           onClick={() => {
             handleStopAll();
             setStep(1);
@@ -823,31 +823,31 @@ export default function App() {
       {step === 1 ? (
         <div className="upload-group">
           <h2>第一步：上传音频伴奏与原声</h2>
-          
+
           <div className={`upload-card ${trackA ? 'active' : ''}`}>
             <span className="icon">🎤</span>
             <div className="title">1. 原唱纯人声干声 (WAV/MP3/M4A/MP4/MOV)</div>
             <div className="desc">{trackA ? trackA.name : '拖拽或点击文件上传，支持音视频自动提取'}</div>
-            <input 
-              type="file" 
-              accept="audio/*,video/mp4,video/quicktime,video/*,.m4a" 
-              onChange={(e) => setTrackA(e.target.files[0])} 
+            <input
+              type="file"
+              accept="audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/m4a,video/mp4,video/quicktime,.mp3,.wav,.m4a,.mp4,.mov"
+              onChange={(e) => setTrackA(e.target.files[0])}
             />
           </div>
-          
+
           <div className={`upload-card ${trackB ? 'active' : ''}`}>
             <span className="icon">🎹</span>
             <div className="title">2. 伴奏/伴歌声轨 (可选，WAV/MP3/M4A/MP4/MOV)</div>
             <div className="desc">{trackB ? trackB.name : '拖拽或点击文件上传，若空则使用原声放音'}</div>
-            <input 
-              type="file" 
-              accept="audio/*,video/mp4,video/quicktime,video/*,.m4a" 
-              onChange={(e) => setTrackB(e.target.files[0])} 
+            <input
+              type="file"
+              accept="audio/*,video/mp4,video/quicktime,video/*,.m4a"
+              onChange={(e) => setTrackB(e.target.files[0])}
             />
           </div>
 
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             disabled={!trackA}
             onClick={handleStartAnalysis}
             style={{ marginTop: '16px' }}
@@ -961,8 +961,8 @@ export default function App() {
                 )}
 
                 {shadowState === 'countdown' && (
-                  <button 
-                    className="btn btn-press-hold pressing" 
+                  <button
+                    className="btn btn-press-hold pressing"
                     style={{ filter: 'hue-rotate(60deg)', color: '#ffffff', opacity: 1, cursor: 'default' }}
                   >
                     🎙 准备... {countdown}s
@@ -970,8 +970,8 @@ export default function App() {
                 )}
 
                 {shadowState === 'following' && (
-                  <button 
-                    className="btn btn-press-hold btn-recording" 
+                  <button
+                    className="btn btn-press-hold btn-recording"
                     onClick={handleStopShadowRecording}
                     style={{ cursor: 'pointer' }}
                   >
