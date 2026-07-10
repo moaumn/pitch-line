@@ -1,0 +1,14 @@
+{
+  "pages": [
+    "pages/index/index"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#0f0f15",
+    "navigationBarTitleText": "准音线",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#0f0f15"
+  },
+  "workers": "workers",
+  "sitemapLocation": "sitemap.json"
+}
