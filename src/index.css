@@ -37,8 +37,9 @@ body {
 #root {
   width: 100%;
   max-width: 600px;
-  min-height: 100vh;
-  padding: 20px 16px;
+  height: 100vh;
+  height: 100svh;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -51,9 +52,16 @@ body {
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--panel-border);
   border-radius: 20px;
-  padding: 24px;
+  padding: 16px;
   box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
-  margin-bottom: 24px;
+  margin-bottom: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  position: relative;
 }
 
 /* Typography */
@@ -212,28 +220,46 @@ p.subtitle {
 .wavesurfer-outer {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  padding: 12px;
-  margin-bottom: 16px;
+  border-radius: 8px;
+  padding: 6px 12px;
+  margin-bottom: 12px;
   position: relative;
 }
 
 .wavesurfer-label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
-/* Dynamic visualizer scroll wrapper */
+/* Dynamic visualizer scroll wrapper - 自动填满除底部外所有剩余高度 */
 .visualizer-wrapper {
   position: relative;
   display: flex;
-  height: 250px;
+  flex: 1;
+  min-height: 0; /* 必须设置，允许子元素在 flex 伸缩时收缩而不溢出 */
   border: 1px solid var(--panel-border);
   border-radius: 16px;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.3);
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+}
+
+.practice-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.footer-controls {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+  box-sizing: border-box;
 }
 
 /* Note scale axis */
@@ -287,19 +313,106 @@ p.subtitle {
   box-shadow: 0 0 8px #a855f7;
 }
 
+/* Tab bar styles for switching training modes */
+.tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--panel-border);
+  margin-bottom: 12px;
+}
+
+.tab-item {
+  flex: 1;
+  text-align: center;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
+  user-select: none;
+}
+
+.tab-item.active {
+  color: #a855f7;
+  border-bottom-color: #a855f7;
+}
+
+.btn-press-hold {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+  user-select: none;
+  touch-action: none;
+}
+
+.btn-press-hold.pressing {
+  background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+  transform: scale(0.98);
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.4);
+}
+
+.btn-recording {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3) !important;
+  animation: pulseRecording 1.5s infinite ease-in-out;
+  color: #fff !important;
+}
+
+@keyframes pulseRecording {
+  0% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(0.985); filter: brightness(1.1); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+.btn-press-hold-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-top: -6px;
+  margin-bottom: 6px;
+}
+
+.stop-rec-icon {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 8px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  font-size: 12px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: all 0.15s ease;
+}
+
+.stop-rec-icon:active {
+  background: rgba(239, 68, 68, 0.4);
+  transform: scale(0.9);
+}
+
 /* Controls grid */
 .controls-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 0;
 }
 
 .controls-grid .btn {
   flex: 1;
-  min-width: 100px;
-  padding: 12px 16px;
+  min-width: 90px;
+  padding: 12px 12px;
   font-size: 13px;
+}
+
+/* Shadow mode controls container */
+.shadow-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .btn-secondary {
@@ -383,5 +496,91 @@ p.subtitle {
   font-size: 16px;
   font-weight: 600;
   letter-spacing: 0.5px;
+}
+
+/* Floating Back Button Style */
+.btn-back-floating {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 18px;
+  cursor: pointer;
+  z-index: 99;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.btn-back-floating:hover {
+  background: rgba(255, 255, 255, 0.18);
+  transform: scale(1.1);
+}
+
+.btn-back-floating:active {
+  transform: scale(0.95);
+}
+
+/* Light Pop-up Score Toast Overlay */
+.toast-score-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 200;
+  pointer-events: none; /* Let clicks pass through if needed, but centering visual focus */
+}
+
+.toast-score-card {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 24px;
+  padding: 24px 36px;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(16, 185, 129, 0.2);
+  animation: toastScaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  pointer-events: auto; /* Allow overlay card interactions if any */
+}
+
+@keyframes toastScaleIn {
+  from { transform: scale(0.85); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.toast-score-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.toast-score-value {
+  font-size: 48px;
+  font-weight: 800;
+  color: #10b981;
+  text-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+  margin: 6px 0;
+}
+
+.toast-score-desc {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
