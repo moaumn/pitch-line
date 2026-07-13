@@ -19,6 +19,29 @@ export default function App() {
   const [countdown, setCountdown] = useState(null);
   const [toastScore, setToastScore] = useState(null);
   const [vocalEnabled, setVocalEnabled] = useState(true); // 是否开启原声音轨 (Vocal Guide Toggle)
+  const [isDetectionOnly, setIsDetectionOnly] = useState(false); // 纯音高检测模式 (No audio file loaded)
+
+  // 录音回放与合成导出状态 (Vocal playback and synthesis states)
+  const [hasAutoRecording, setHasAutoRecording] = useState(false);
+  const [hasShadowRecording, setHasShadowRecording] = useState(false);
+  const [isReplayingRecording, setIsReplayingRecording] = useState(false);
+
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const autoVocalBlobRef = useRef(null);
+  const lastShadowVocalBlobRef = useRef(null);
+  const shadowSegmentsRef = useRef([]); // 存储跟读模式下的所有历史录音分段
+  const activePlaybackAudioRef = useRef(null);
+  const decodedAccompanimentBufferRef = useRef(null);
+  const practiceDurationRef = useRef(0);
+
+  const isDetectionOnlyRef = useRef(false);
+  const detectionStartMsRef = useRef(0);
+  const recordingRef = useRef(false);
+
+  useEffect(() => {
+    recordingRef.current = recording;
+  }, [recording]);
 
   const shadowTimerRef = useRef(null);
   const countdownIntervalRef = useRef(null);
@@ -43,6 +66,11 @@ export default function App() {
   const globalContourRef = useRef([]);
   const userContourRef = useRef([]);
   const [pitchRange, setPitchRange] = useState({ min: 48, max: 84 });
+  const pitchRangeRef = useRef({ min: 48, max: 84 });
+  const updatePitchRange = (range) => {
+    setPitchRange(range);
+    pitchRangeRef.current = range;
+  };
 
   // 禁用页面右键菜单
   useEffect(() => {
@@ -67,7 +95,7 @@ export default function App() {
         if (validPitches.length > 0) {
           const min = Math.max(36, Math.floor(Math.min(...validPitches) - 3));
           const max = Math.min(96, Math.ceil(Math.max(...validPitches) + 3));
-          setPitchRange({ min, max });
+          updatePitchRange({ min, max });
         }
 
         setLoadingText(null);
@@ -79,7 +107,22 @@ export default function App() {
       }
       else if (type === 'frame_pitch') {
         const { midi } = e.data;
-        if (wavesurferRef.current) {
+        if (midi > 0) {
+          const currentRange = pitchRangeRef.current;
+          if (midi < currentRange.min) {
+            updatePitchRange({ min: Math.max(12, Math.floor(midi) - 3), max: currentRange.max });
+          } else if (midi > currentRange.max) {
+            updatePitchRange({ min: currentRange.min, max: Math.min(127, Math.ceil(midi) + 3) });
+          }
+        }
+        if (recording && isDetectionOnlyRef.current) {
+          // 纯音高检测模式：根据运行时间对齐，直接写入用户曲线
+          const currentTime = (performance.now() - detectionStartMsRef.current) / 1000;
+          const frameIndex = Math.floor(currentTime * (16000 / 512));
+          if (frameIndex >= 0 && frameIndex < userContourRef.current.length) {
+            userContourRef.current[frameIndex] = midi;
+          }
+        } else if (wavesurferRef.current) {
           if (recording && playing) {
             // 自动模式：根据伴奏时间对齐，且仅在播放未暂停时写入
             const currentTime = wavesurferRef.current.getCurrentTime();
@@ -104,6 +147,94 @@ export default function App() {
       }
     };
   }, [recording, shadowRecording, playing]);
+
+  const isScrubbingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartTimeRef = useRef(0);
+  const scrubbedTimeRef = useRef(0);
+
+  const handleCanvasDragStart = (clientX) => {
+    if (!wavesurferRef.current || isDetectionOnlyRef.current) return;
+    isScrubbingRef.current = true;
+    dragStartXRef.current = clientX;
+    dragStartTimeRef.current = wavesurferRef.current.getCurrentTime();
+    scrubbedTimeRef.current = dragStartTimeRef.current;
+  };
+
+  const handleCanvasDragMove = (clientX) => {
+    if (!isScrubbingRef.current || !wavesurferRef.current) return;
+    const deltaX = clientX - dragStartXRef.current;
+    const SECONDS_PER_PIXEL = 0.032 / 5; // 1px = 6.4ms
+    let newTime = dragStartTimeRef.current - deltaX * SECONDS_PER_PIXEL;
+    const duration = wavesurferRef.current.getDuration();
+    newTime = Math.max(0, Math.min(newTime, duration));
+    scrubbedTimeRef.current = newTime;
+  };
+
+  const handleCanvasDragEnd = () => {
+    if (isScrubbingRef.current && wavesurferRef.current) {
+      wavesurferRef.current.setTime(scrubbedTimeRef.current);
+    }
+    isScrubbingRef.current = false;
+  };
+
+  const handleWaveformDragStart = (clientX, target) => {
+    if (!wavesurferRef.current) return;
+    const rect = target.getBoundingClientRect();
+    const offsetX = clientX - rect.left;
+    const pct = Math.max(0, Math.min(offsetX / rect.width, 1));
+    const duration = wavesurferRef.current.getDuration();
+    
+    isScrubbingRef.current = true;
+    scrubbedTimeRef.current = pct * duration;
+  };
+
+  const handleWaveformDragMove = (clientX, target) => {
+    if (!isScrubbingRef.current || !wavesurferRef.current) return;
+    const rect = target.getBoundingClientRect();
+    const offsetX = clientX - rect.left;
+    const pct = Math.max(0, Math.min(offsetX / rect.width, 1));
+    const duration = wavesurferRef.current.getDuration();
+    
+    scrubbedTimeRef.current = pct * duration;
+  };
+
+  const handleCanvasMouseDown = (e) => {
+    handleCanvasDragStart(e.clientX);
+  };
+
+  const handleCanvasMouseMove = (e) => {
+    handleCanvasDragMove(e.clientX);
+  };
+
+  const handleCanvasMouseUp = () => {
+    handleCanvasDragEnd();
+  };
+
+  const handleCanvasTouchStart = (e) => {
+    if (e.touches.length > 0) {
+      handleCanvasDragStart(e.touches[0].clientX);
+    }
+  };
+
+  const handleCanvasTouchMove = (e) => {
+    if (e.touches.length > 0) {
+      handleCanvasDragMove(e.touches[0].clientX);
+    }
+  };
+
+  const handleCanvasTouchEnd = () => {
+    handleCanvasDragEnd();
+  };
+
+  const handleStartDetection = () => {
+    isDetectionOnlyRef.current = true;
+    setIsDetectionOnly(true);
+    userContourRef.current = new Array(50000).fill(0);
+    globalContourRef.current = [];
+    updatePitchRange({ min: 48, max: 84 });
+    setStep(2);
+  };
 
   const handleStartAnalysis = async () => {
     if (!trackA) return;
@@ -145,7 +276,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (step === 2) {
+    if (step === 2 && !isDetectionOnly) {
       wavesurferRef.current = WaveSurfer.create({
         container: '#waveform',
         waveColor: '#4f46e5',
@@ -154,12 +285,26 @@ export default function App() {
         barWidth: 2,
         barRadius: 2,
         height: 28,
-        normalize: true
+        normalize: true,
+        interact: false
       });
 
       // 伴奏可选：若用户未上传伴奏，加载原唱干声作为放音与同步基准
       const audioFile = trackB || trackA;
       wavesurferRef.current.load(URL.createObjectURL(audioFile));
+
+      // 异步解码完整伴奏供混合导出使用
+      const bufferReader = new FileReader();
+      bufferReader.onload = async (event) => {
+        try {
+          const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+          decodedAccompanimentBufferRef.current = await offlineCtx.decodeAudioData(event.target.result);
+          console.log('[Main] Accompaniment decoded successfully for export.');
+        } catch (err) {
+          console.error('[Main] Failed to decode accompaniment for mix/export:', err);
+        }
+      };
+      bufferReader.readAsArrayBuffer(audioFile);
 
       wavesurferRef.current.on('play', () => setPlaying(true));
       wavesurferRef.current.on('pause', () => setPlaying(false));
@@ -182,6 +327,7 @@ export default function App() {
       return () => {
         if (wavesurferRef.current) {
           wavesurferRef.current.destroy();
+          wavesurferRef.current = null;
         }
         if (vocalAudioRef.current) {
           vocalAudioRef.current.pause();
@@ -190,7 +336,7 @@ export default function App() {
         }
       };
     }
-  }, [step, trackA, trackB]);
+  }, [step, trackA, trackB, isDetectionOnly]);
 
   useEffect(() => {
     if (step === 2 && canvasRef.current) {
@@ -224,9 +370,13 @@ export default function App() {
           ctx.stroke();
         }
 
-        // 跟读模式 following 状态时，使用虚拟播放头从 segmentStart 开始实时滚动
+        // 跟读模式 following 状态、拖动状态或纯音高检测模式下，计算实时滚动位置
         let currentTime;
-        if (shadowStateRef.current === 'following') {
+        if (isDetectionOnlyRef.current) {
+          currentTime = recordingRef.current ? (performance.now() - detectionStartMsRef.current) / 1000 : 0;
+        } else if (isScrubbingRef.current) {
+          currentTime = scrubbedTimeRef.current;
+        } else if (shadowStateRef.current === 'following') {
           const elapsed = (performance.now() - followStartMsRef.current) / 1000;
           currentTime = segmentStartRef.current + elapsed;
           currentTime = Math.min(currentTime, segmentEndRef.current);
@@ -287,13 +437,16 @@ export default function App() {
           if (inStroke) ctx.stroke();
         };
 
-        drawCurve(globalContourRef.current, '#f59e0b', 3, true);
+        if (!isDetectionOnlyRef.current) {
+          drawCurve(globalContourRef.current, '#f59e0b', 3, true);
+        }
         drawCurve(userContourRef.current, '#10b981', 3, false);
 
         // 实时在屏幕播放竖线位置显示当前音高 (Draw current pitch label at the vertical playhead line)
         const frameIdx = Math.floor(playheadFrame);
-        if (frameIdx >= 0 && frameIdx < globalContourRef.current.length) {
-          const targetMidi = globalContourRef.current[frameIdx];
+        const maxLen = isDetectionOnlyRef.current ? userContourRef.current.length : globalContourRef.current.length;
+        if (frameIdx >= 0 && frameIdx < maxLen) {
+          const targetMidi = isDetectionOnlyRef.current ? 0 : globalContourRef.current[frameIdx];
           const userMidi = userContourRef.current[frameIdx];
 
           ctx.save();
@@ -353,6 +506,23 @@ export default function App() {
       userContourRef.current = new Array(globalContourRef.current.length).fill(0);
       await ensureMicReady();
 
+      // 初始化并开启 MediaRecorder 录制人声音频
+      audioChunksRef.current = [];
+      if (micStreamRef.current) {
+        mediaRecorderRef.current = new MediaRecorder(micStreamRef.current);
+        mediaRecorderRef.current.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            audioChunksRef.current.push(e.data);
+          }
+        };
+        mediaRecorderRef.current.onstop = () => {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          autoVocalBlobRef.current = blob;
+          setHasAutoRecording(true);
+        };
+        mediaRecorderRef.current.start();
+      }
+
       // 同步播放人声音轨
       if (vocalEnabled && vocalAudioRef.current) {
         vocalAudioRef.current.currentTime = 0;
@@ -375,11 +545,17 @@ export default function App() {
       if (vocalAudioRef.current) {
         vocalAudioRef.current.pause();
       }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.pause();
+      }
     } else {
       wavesurferRef.current.play();
       if (vocalEnabled && vocalAudioRef.current) {
         vocalAudioRef.current.currentTime = wavesurferRef.current.getCurrentTime();
         vocalAudioRef.current.play().catch(() => { });
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+        mediaRecorderRef.current.resume();
       }
     }
   };
@@ -404,7 +580,14 @@ export default function App() {
   const ensureMicReady = async () => {
     if (audioContextRef.current) return; // already running
 
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const constraints = {
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
     micStreamRef.current = stream;
     workerRef.current.postMessage({ type: 'start_recording' });
 
@@ -447,11 +630,17 @@ export default function App() {
   };
 
   const handleStopAll = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
     if (wavesurferRef.current) {
+      practiceDurationRef.current = wavesurferRef.current.getCurrentTime();
       wavesurferRef.current.pause();
+      wavesurferRef.current.setTime(0); // 进度归零 (Reset progress to zero)
     }
     if (vocalAudioRef.current) {
       vocalAudioRef.current.pause();
+      vocalAudioRef.current.currentTime = 0;
     }
 
     // 清理跟唱与倒计时定时器 (Clean up all countdown and recording timers)
@@ -466,7 +655,182 @@ export default function App() {
     setShadowRecording(false);
     shadowStateRef.current = 'idle';
     setShadowState('idle');
-    calculateScore();
+    if (!isDetectionOnlyRef.current) {
+      calculateScore();
+    }
+  };
+
+  // === Playback & Export Handlers ===
+  const handleStartPlayback = () => {
+    if (!wavesurferRef.current) return;
+    
+    let vocalBlob = null;
+    let startOffset = 0;
+    
+    if (trainingMode === 'shadow') {
+      vocalBlob = lastShadowVocalBlobRef.current;
+      startOffset = segmentStartRef.current;
+    } else {
+      vocalBlob = autoVocalBlobRef.current;
+      startOffset = 0;
+    }
+
+    if (!vocalBlob) {
+      alert("暂无录音可供回放。");
+      return;
+    }
+
+    handleStopPlayback();
+
+    const url = URL.createObjectURL(vocalBlob);
+    const audio = new Audio(url);
+    activePlaybackAudioRef.current = audio;
+    
+    setIsReplayingRecording(true);
+
+    if (trainingMode === 'shadow') {
+      const duration = wavesurferRef.current.getDuration();
+      wavesurferRef.current.seekTo(startOffset / duration);
+      
+      const onTimeUpdate = () => {
+        if (!wavesurferRef.current) return;
+        const time = wavesurferRef.current.getCurrentTime();
+        if (time >= segmentEndRef.current - 0.05) {
+          handleStopPlayback();
+        }
+      };
+
+      wavesurferRef.current.on('timeupdate', onTimeUpdate);
+      wavesurferRef.current.on('pause', () => audio.pause());
+      wavesurferRef.current.on('play', () => audio.play().catch(()=>{}));
+      
+      activePlaybackAudioRef.current._cleanup = () => {
+        if (wavesurferRef.current) {
+          wavesurferRef.current.un('timeupdate', onTimeUpdate);
+        }
+      };
+      
+      audio.currentTime = 0;
+      audio.play().catch(()=>{});
+      wavesurferRef.current.play();
+    } else {
+      wavesurferRef.current.seekTo(0);
+
+      const onTimeUpdate = () => {
+        if (!wavesurferRef.current || !activePlaybackAudioRef.current) return;
+        const wsTime = wavesurferRef.current.getCurrentTime();
+        const diff = Math.abs(activePlaybackAudioRef.current.currentTime - wsTime);
+        if (diff > 0.15) {
+          activePlaybackAudioRef.current.currentTime = wsTime;
+        }
+      };
+
+      wavesurferRef.current.on('timeupdate', onTimeUpdate);
+      wavesurferRef.current.on('pause', () => audio.pause());
+      wavesurferRef.current.on('play', () => audio.play().catch(()=>{}));
+
+      activePlaybackAudioRef.current._cleanup = () => {
+        if (wavesurferRef.current) {
+          wavesurferRef.current.un('timeupdate', onTimeUpdate);
+        }
+      };
+
+      audio.currentTime = 0;
+      audio.play().catch(()=>{});
+      wavesurferRef.current.play();
+    }
+  };
+
+  const handleStopPlayback = () => {
+    setIsReplayingRecording(false);
+    
+    if (activePlaybackAudioRef.current) {
+      activePlaybackAudioRef.current.pause();
+      if (activePlaybackAudioRef.current._cleanup) {
+        activePlaybackAudioRef.current._cleanup();
+      }
+      activePlaybackAudioRef.current = null;
+    }
+    
+    if (wavesurferRef.current) {
+      wavesurferRef.current.pause();
+      wavesurferRef.current.setTime(0);
+    }
+  };
+
+  const exportMixedAudio = async (isConcatAll) => {
+    setLoadingText("正在混合人声与伴奏，请稍候...");
+
+    try {
+      let duration = 0;
+      let vocalsToMix = [];
+
+      if (isConcatAll) {
+        // 跟唱模式下，只导出至最远的已录制片段结束位置 (Only export up to the end of the furthest recorded segment)
+        const maxEndTime = shadowSegmentsRef.current.reduce((max, seg) => Math.max(max, seg.end), 0);
+        duration = maxEndTime > 0 ? maxEndTime : (decodedAccompanimentBufferRef.current ? decodedAccompanimentBufferRef.current.duration : 10);
+        
+        const offlineCtxForDecoding = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+        for (const seg of shadowSegmentsRef.current) {
+          const vocalBuf = await decodeBlobToAudioBuffer(seg.blob, offlineCtxForDecoding);
+          vocalsToMix.push({ start: seg.start, buffer: vocalBuf });
+        }
+      } else {
+        if (!autoVocalBlobRef.current) {
+          alert("暂无录音文件可供导出。");
+          setLoadingText(null);
+          return;
+        }
+        // 自动模式下，只导出至当初点击停止时的进度位置 (Only export up to the position where stop was clicked)
+        duration = practiceDurationRef.current > 0 ? practiceDurationRef.current : wavesurferRef.current.getDuration();
+        
+        const offlineCtxForDecoding = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 44100, 44100);
+        const vocalBuf = await decodeBlobToAudioBuffer(autoVocalBlobRef.current, offlineCtxForDecoding);
+        vocalsToMix.push({ start: 0, buffer: vocalBuf });
+      }
+
+      // 降低采样率减小体积 (Mono 单声道 + 22050Hz 采样率，可实现近 4 倍的无损级别体积压缩)
+      const exportSampleRate = 22050;
+      const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(
+        1, 
+        Math.floor(exportSampleRate * duration), 
+        exportSampleRate
+      );
+
+      // 仅在存在分轨伴奏 trackB 且非原唱 trackA 时混入伴奏 (避免混入原唱干声中原有的歌手人声轨道)
+      if (trackB && decodedAccompanimentBufferRef.current) {
+        const accompSource = offlineCtx.createBufferSource();
+        accompSource.buffer = decodedAccompanimentBufferRef.current;
+        accompSource.connect(offlineCtx.destination);
+        accompSource.start(0);
+      }
+
+      for (const item of vocalsToMix) {
+        const vocalSource = offlineCtx.createBufferSource();
+        vocalSource.buffer = item.buffer;
+        vocalSource.connect(offlineCtx.destination);
+        vocalSource.start(item.start);
+      }
+
+      const renderedBuffer = await offlineCtx.startRendering();
+      const wavBlob = bufferToWav(renderedBuffer);
+
+      const url = URL.createObjectURL(wavBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = isConcatAll ? "pitch_line_shadow_mix.wav" : "pitch_line_auto_mix.wav";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setLoadingText(null);
+      alert("🎉 音频混合并导出成功！");
+    } catch (err) {
+      console.error(err);
+      setLoadingText(null);
+      alert("混合并导出音频失败：" + err.message);
+    }
   };
 
   // === Shadow (跟读) Mode Handlers ===
@@ -549,6 +913,37 @@ export default function App() {
       return;
     }
 
+    // 初始化并开启 MediaRecorder 录制当前跟读分段
+    audioChunksRef.current = [];
+    if (micStreamRef.current) {
+      mediaRecorderRef.current = new MediaRecorder(micStreamRef.current);
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+      mediaRecorderRef.current.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        lastShadowVocalBlobRef.current = blob;
+
+        const segment = {
+          start: segmentStartRef.current,
+          end: segmentEndRef.current,
+          blob
+        };
+
+        // 覆盖重复或新增分段
+        const idx = shadowSegmentsRef.current.findIndex(s => Math.abs(s.start - segment.start) < 0.1);
+        if (idx >= 0) {
+          shadowSegmentsRef.current[idx] = segment;
+        } else {
+          shadowSegmentsRef.current.push(segment);
+        }
+        setHasShadowRecording(true);
+      };
+      mediaRecorderRef.current.start();
+    }
+
     shadowFrameCountRef.current = 0;
     followStartMsRef.current = performance.now();
     shadowStateRef.current = 'following';
@@ -562,9 +957,9 @@ export default function App() {
       wavesurferRef.current.play();
     }
 
-    // 自动结束跟唱：持续时间 = 录制时长 + 2秒延迟
+    // 自动结束跟唱：持续时间 = 录制段落时长，到期直接结束录音 (Stop recording immediately when segment duration is reached)
     const segmentDuration = segmentEndRef.current - segmentStartRef.current;
-    const totalDurationSec = Math.max(0.5, segmentDuration + 2);
+    const totalDurationSec = Math.max(0.5, segmentDuration);
 
     shadowTimerRef.current = setTimeout(() => {
       handleStopShadowRecording();
@@ -678,6 +1073,10 @@ export default function App() {
 
   const handleStopShadowRecording = () => {
     setShadowRecording(false);
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
 
     if (shadowTimerRef.current) {
       clearTimeout(shadowTimerRef.current);
@@ -805,6 +1204,12 @@ export default function App() {
           className="btn-back-floating"
           onClick={() => {
             handleStopAll();
+            handleStopPlayback();
+            isDetectionOnlyRef.current = false;
+            setIsDetectionOnly(false);
+            setHasAutoRecording(false);
+            setHasShadowRecording(false);
+            shadowSegmentsRef.current = [];
             setStep(1);
           }}
           title="返回重新上传"
@@ -854,160 +1259,266 @@ export default function App() {
           >
             开始音高练习
           </button>
+          <div
+            onClick={handleStartDetection}
+            style={{
+              marginTop: '8px',
+              color: 'var(--text-muted)',
+              fontSize: '13px',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              width: '100%',
+              textAlign: 'center',
+            }}
+          >
+            音高检测
+          </div>
         </div>
       ) : (
         <div className="practice-container">
-          {/* 1. 音高区域占领所有剩余高度 (Maximized Visualizer) */}
+          {/* 1. 伴奏进度置于顶部 (纯检测模式下隐去) */}
+          {!isDetectionOnly && (
+            <div className="wavesurfer-outer" style={{ marginBottom: '12px' }}>
+              <div className="wavesurfer-label">音频伴奏声轨进度 (可左右拖拽调节)</div>
+              <div 
+                id="waveform"
+                onMouseDown={(e) => handleWaveformDragStart(e.clientX, e.currentTarget)}
+                onMouseMove={(e) => handleWaveformDragMove(e.clientX, e.currentTarget)}
+                onMouseUp={handleCanvasDragEnd}
+                onMouseLeave={handleCanvasDragEnd}
+                onTouchStart={(e) => { if (e.touches.length > 0) handleWaveformDragStart(e.touches[0].clientX, e.currentTarget); }}
+                onTouchMove={(e) => { if (e.touches.length > 0) handleWaveformDragMove(e.touches[0].clientX, e.currentTarget); }}
+                onTouchEnd={handleCanvasDragEnd}
+                onTouchCancel={handleCanvasDragEnd}
+                style={{ cursor: 'ew-resize' }}
+              ></div>
+            </div>
+          )}
+
+          {/* 2. 音高区域占领所有剩余高度 (Maximized Visualizer) */}
           <div className="visualizer-wrapper">
             <div className="note-axis">
               {renderNoteLabels()}
             </div>
             <div className="visualizer-canvas-container">
               <div className="timeline-cursor"></div>
-              <canvas ref={canvasRef} className="pitch-canvas"></canvas>
+              <canvas 
+                ref={canvasRef} 
+                className="pitch-canvas"
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={handleCanvasMouseUp}
+                onMouseLeave={handleCanvasDragEnd}
+                onTouchStart={handleCanvasTouchStart}
+                onTouchMove={handleCanvasTouchMove}
+                onTouchEnd={handleCanvasTouchEnd}
+                style={{ cursor: isDetectionOnly ? 'default' : 'ew-resize' }}
+              ></canvas>
             </div>
           </div>
 
-          {/* 2. 伴奏进度缩减一半，紧贴音高区下方 */}
-          <div className="wavesurfer-outer">
-            <div className="wavesurfer-label">音频伴奏声轨进度</div>
-            <div id="waveform"></div>
-          </div>
-
-          {/* 3. 底部操作区域 - 双模式 Tab */}
+          {/* 3. 底部操作区域 */}
           <div className="footer-controls">
-            {/* Tab 切换栏 */}
-            <div className="tab-bar">
-              <div
-                className={`tab-item ${trainingMode === 'auto' ? 'active' : ''}`}
-                onClick={() => {
-                  handleStopAll();
-                  setTrainingMode('auto');
-                }}
-              >
-                🎵 自动模式
-              </div>
-              <div
-                className={`tab-item ${trainingMode === 'shadow' ? 'active' : ''}`}
-                onClick={() => {
-                  handleStopAll();
-                  setTrainingMode('shadow');
-                }}
-              >
-                🎯 跟读模式
-              </div>
-            </div>
-
-            {/* ===== 自动模式 ===== */}
-            {trainingMode === 'auto' && (
+            {isDetectionOnly ? (
               <div className="controls-grid">
-                {/* 按钮 1：开始录音 / 暂停 / 继续 */}
                 {!recording ? (
                   <button
                     className="btn btn-success"
-                    onClick={handleStartRecording}
+                    onClick={async () => {
+                      userContourRef.current = new Array(50000).fill(0);
+                      detectionStartMsRef.current = performance.now();
+                      try {
+                        await ensureMicReady();
+                        setRecording(true);
+                      } catch (err) {
+                        console.error(err);
+                        alert('无法开启麦克风录音。');
+                      }
+                    }}
                   >
-                    🎤 开始录音
+                    🎤 开始实时音高检测
                   </button>
                 ) : (
                   <button
-                    className="btn btn-secondary"
-                    onClick={handleTogglePlayPause}
+                    className="btn btn-danger"
+                    onClick={handleStopAll}
                   >
-                    {playing ? '⏸ 暂停' : '▶ 继续'}
+                    ⏹ 停止检测
                   </button>
                 )}
-
-                {/* 按钮 2：原声开关 */}
-                <button
-                  className="btn btn-secondary"
-                  onClick={handleToggleVocal}
-                  disabled={!trackB}
-                >
-                  {vocalEnabled ? '🔊 原声: 开' : '🔇 原声: 关'}
-                </button>
-
-                {/* 按钮 3：停止并结算 */}
-                <button
-                  className="btn btn-danger"
-                  onClick={handleStopAll}
-                  disabled={!recording}
-                >
-                  ⏹ 停止
-                </button>
               </div>
-            )}
-
-            {/* ===== 跟读模式 ===== */}
-            {trainingMode === 'shadow' && (
-              <div className="shadow-controls">
-                {/* 统一提示文案标签，根据状态动态切换 */}
-                <p className="btn-press-hold-label">
-                  {shadowState === 'idle' && '按住下方按钮播放原音，松开后跟唱该段'}
-                  {shadowState === 'listening' && '🔊 播放中… 松开开始跟唱'}
-                  {shadowState === 'countdown' && `🎙 准备跟唱 (倒计时 ${countdown}秒)...`}
-                  {shadowState === 'following' && '🎤 正在录音，请跟唱 (点击下方按钮停止)'}
-                  {shadowState === 'following_done' && '🎤 跟唱结束，可选择重新录制或下一段'}
-                </p>
-
-                {/* 交互按钮区域 */}
-                {shadowState === 'replaying' && (
-                  <button
-                    className="btn btn-secondary"
-                    onClick={handleCancelRetry}
+            ) : (
+              <>
+                {/* Tab 切换栏 */}
+                <div className="tab-bar">
+                  <div
+                    className={`tab-item ${trainingMode === 'auto' ? 'active' : ''}`}
+                    onClick={() => {
+                      handleStopAll();
+                      setTrainingMode('auto');
+                    }}
                   >
-                    ✕ 取消
-                  </button>
-                )}
-
-                {shadowState === 'countdown' && (
-                  <button
-                    className="btn btn-press-hold pressing"
-                    style={{ filter: 'hue-rotate(60deg)', color: '#ffffff', opacity: 1, cursor: 'default' }}
+                    🎵 自动模式
+                  </div>
+                  <div
+                    className={`tab-item ${trainingMode === 'shadow' ? 'active' : ''}`}
+                    onClick={() => {
+                      handleStopAll();
+                      setTrainingMode('shadow');
+                    }}
                   >
-                    🎙 准备... {countdown}s
-                  </button>
-                )}
+                    🎯 跟读模式
+                  </div>
+                </div>
 
-                {shadowState === 'following' && (
-                  <button
-                    className="btn btn-press-hold btn-recording"
-                    onClick={handleStopShadowRecording}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    ⏹ 正在跟唱录音中... 点击停止
-                  </button>
-                )}
+                {/* ===== 自动模式 ===== */}
+                {trainingMode === 'auto' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+                    <div className="controls-grid">
+                      {/* 按钮 1：开始录音 / 暂停 / 继续 */}
+                      {!recording ? (
+                        <button
+                          className="btn btn-success"
+                          onClick={handleStartRecording}
+                        >
+                          🎤 开始录音
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={handleTogglePlayPause}
+                        >
+                          {playing ? '⏸ 暂停' : '▶ 继续'}
+                        </button>
+                      )}
 
-                {(shadowState === 'idle' || shadowState === 'listening' || shadowState === 'following_done') && (
-                  <div className="controls-grid">
-                    {/* “再试一次”仅在 following_done 状态显示 */}
-                    {shadowState === 'following_done' && (
+                      {/* 按钮 2：原声开关 */}
                       <button
                         className="btn btn-secondary"
-                        onClick={handleShadowRetry}
+                        onClick={handleToggleVocal}
+                        disabled={!trackB}
                       >
-                        🔄 再试一次
+                        {vocalEnabled ? '🔊 原声: 开' : '🔇 原声: 关'}
+                      </button>
+
+                      {/* 按钮 3：停止并结算 */}
+                      <button
+                        className="btn btn-danger"
+                        onClick={handleStopAll}
+                        disabled={!recording}
+                      >
+                        ⏹ 停止
+                      </button>
+                    </div>
+                    {hasAutoRecording && (
+                      <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                        {isReplayingRecording ? (
+                          <button className="btn btn-danger" onClick={handleStopPlayback} style={{ width: '100%' }}>
+                            ⏹ 停止回放
+                          </button>
+                        ) : (
+                          <button className="btn btn-primary" onClick={handleStartPlayback} style={{ width: '100%' }}>
+                            🔊 回放录音 (带伴奏)
+                          </button>
+                        )}
+                        <button className="btn btn-success" onClick={() => exportMixedAudio(false)} style={{ width: '100%' }}>
+                          💾 导出合成音频 (.wav)
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ===== 跟读模式 ===== */}
+                {trainingMode === 'shadow' && (
+                  <div className="shadow-controls">
+                    {/* 统一提示文案标签，根据状态动态切换 */}
+                    <p className="btn-press-hold-label">
+                      {shadowState === 'idle' && '按住下方按钮播放原音，松开后跟唱该段'}
+                      {shadowState === 'listening' && '🔊 播放中… 松开开始跟唱'}
+                      {shadowState === 'countdown' && `🎙 准备跟唱 (倒计时 ${countdown}秒)...`}
+                      {shadowState === 'following' && '🎤 正在录音，请跟唱 (点击下方按钮停止)'}
+                      {shadowState === 'following_done' && '🎤 跟唱结束，可选择重新录制或下一段'}
+                    </p>
+
+                    {/* 交互按钮区域 */}
+                    {shadowState === 'replaying' && (
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleCancelRetry}
+                      >
+                        ✕ 取消
                       </button>
                     )}
 
-                    {/* 始终保持挂载的长按主交互按钮 */}
-                    <button
-                      className={`btn btn-press-hold ${shadowState === 'listening' ? 'pressing' : ''}`}
-                      onMouseDown={handleShadowPressStart}
-                      onMouseUp={handleShadowPressEnd}
-                      onMouseLeave={(e) => { if (shadowStateRef.current === 'listening') handleShadowPressEnd(e); }}
-                      onTouchStart={handleShadowPressStart}
-                      onTouchEnd={handleShadowPressEnd}
-                      onTouchCancel={handleShadowPressEnd}
-                    >
-                      {shadowState === 'idle' && '🔊 按住播放'}
-                      {shadowState === 'listening' && '🔊 播放中…'}
-                      {shadowState === 'following_done' && '▶ 按住继续下一段'}
-                    </button>
+                    {shadowState === 'countdown' && (
+                      <button
+                        className="btn btn-press-hold pressing"
+                        style={{ filter: 'hue-rotate(60deg)', color: '#ffffff', opacity: 1, cursor: 'default' }}
+                      >
+                        🎙 准备... {countdown}s
+                      </button>
+                    )}
+
+                    {shadowState === 'following' && (
+                      <button
+                        className="btn btn-press-hold btn-recording"
+                        onClick={handleStopShadowRecording}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        ⏹ 正在跟唱录音中... 点击停止
+                      </button>
+                    )}
+
+                    {(shadowState === 'idle' || shadowState === 'listening' || shadowState === 'following_done') && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
+                        <div className="controls-grid">
+                          {/* “再试一次”仅在 following_done 状态显示 */}
+                          {shadowState === 'following_done' && (
+                            <button
+                              className="btn btn-secondary"
+                              onClick={handleShadowRetry}
+                            >
+                              🔄 再试一次
+                            </button>
+                          )}
+
+                          {/* 始终保持挂载的长按主交互按钮 */}
+                          <button
+                            className={`btn btn-press-hold ${shadowState === 'listening' ? 'pressing' : ''}`}
+                            onMouseDown={handleShadowPressStart}
+                            onMouseUp={handleShadowPressEnd}
+                            onMouseLeave={(e) => { if (shadowStateRef.current === 'listening') handleShadowPressEnd(e); }}
+                            onTouchStart={handleShadowPressStart}
+                            onTouchEnd={handleShadowPressEnd}
+                            onTouchCancel={handleShadowPressEnd}
+                          >
+                            {shadowState === 'idle' && '🔊 按住播放'}
+                            {shadowState === 'listening' && '🔊 播放中…'}
+                            {shadowState === 'following_done' && '▶ 按住继续下一段'}
+                          </button>
+                        </div>
+                        {hasShadowRecording && shadowState === 'following_done' && (
+                          <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                            {isReplayingRecording ? (
+                              <button className="btn btn-danger" onClick={handleStopPlayback} style={{ width: '100%' }}>
+                                ⏹ 停止回放
+                              </button>
+                            ) : (
+                              <button className="btn btn-primary" onClick={handleStartPlayback} style={{ width: '100%' }}>
+                                🔊 回放上一段
+                              </button>
+                            )}
+                            <button className="btn btn-success" onClick={() => exportMixedAudio(true)} style={{ width: '100%' }}>
+                              💾 导出完整合成 (.wav)
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
+              </>
             )}
 
           </div>
@@ -1028,4 +1539,72 @@ export default function App() {
       )}
     </div>
   );
+}
+
+// === Audio Helper Functions for Mix and Export (WAV encoder) ===
+async function decodeBlobToAudioBuffer(blob, offlineCtx) {
+  const arrayBuffer = await blob.arrayBuffer();
+  return await offlineCtx.decodeAudioData(arrayBuffer);
+}
+
+function bufferToWav(buffer) {
+  const numOfChan = buffer.numberOfChannels;
+  const sampleRate = buffer.sampleRate;
+  const format = 1; // raw PCM
+  const bitDepth = 16;
+  
+  let result;
+  if (numOfChan === 2) {
+    result = interleave(buffer.getChannelData(0), buffer.getChannelData(1));
+  } else {
+    result = buffer.getChannelData(0);
+  }
+  
+  const bufferLen = result.length * 2;
+  const arrayBuffer = new ArrayBuffer(44 + bufferLen);
+  const view = new DataView(arrayBuffer);
+  
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + bufferLen, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, format, true);
+  view.setUint16(22, numOfChan, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numOfChan * 2, true);
+  view.setUint16(32, numOfChan * 2, true);
+  view.setUint16(34, bitDepth, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, bufferLen, true);
+  
+  floatTo16BitPCM(view, 44, result);
+  
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+function interleave(inputL, inputR) {
+  const length = inputL.length + inputR.length;
+  const result = new Float32Array(length);
+  let index = 0;
+  let inputIndex = 0;
+  while (index < length) {
+    result[index++] = inputL[inputIndex];
+    result[index++] = inputR[inputIndex];
+    inputIndex++;
+  }
+  return result;
+}
+
+function floatTo16BitPCM(output, offset, input) {
+  for (let i = 0; i < input.length; i++, offset += 2) {
+    let s = Math.max(-1, Math.min(1, input[i]));
+    output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
 }
