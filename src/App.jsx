@@ -719,6 +719,10 @@ export default function App() {
       const onTimeUpdate = () => {
         if (!wavesurferRef.current || !activePlaybackAudioRef.current) return;
         const wsTime = wavesurferRef.current.getCurrentTime();
+        if (practiceDurationRef.current > 0 && wsTime >= practiceDurationRef.current - 0.05) {
+          handleStopPlayback();
+          return;
+        }
         const diff = Math.abs(activePlaybackAudioRef.current.currentTime - wsTime);
         if (diff > 0.15) {
           activePlaybackAudioRef.current.currentTime = wsTime;
@@ -1417,11 +1421,11 @@ export default function App() {
                             ⏹ 停止回放
                           </button>
                         ) : (
-                          <button className="btn btn-primary" onClick={handleStartPlayback} style={{ width: '100%' }}>
+                          <button className="btn btn-primary" onClick={handleStartPlayback} style={{ width: '100%' }} disabled={recording}>
                             🔊 回放录音 (带伴奏)
                           </button>
                         )}
-                        <button className="btn btn-success" onClick={() => exportMixedAudio(false)} style={{ width: '100%' }}>
+                        <button className="btn btn-success" onClick={() => exportMixedAudio(false)} style={{ width: '100%' }} disabled={recording}>
                           💾 导出合成音频 (.wav)
                         </button>
                       </div>
@@ -1431,91 +1435,98 @@ export default function App() {
 
                 {/* ===== 跟读模式 ===== */}
                 {trainingMode === 'shadow' && (
-                  <div className="shadow-controls">
-                    {/* 统一提示文案标签，根据状态动态切换 */}
-                    <p className="btn-press-hold-label">
-                      {shadowState === 'idle' && '按住下方按钮播放原音，松开后跟唱该段'}
-                      {shadowState === 'listening' && '🔊 播放中… 松开开始跟唱'}
-                      {shadowState === 'countdown' && `🎙 准备跟唱 (倒计时 ${countdown}秒)...`}
-                      {shadowState === 'following' && '🎤 正在录音，请跟唱 (点击下方按钮停止)'}
-                      {shadowState === 'following_done' && '🎤 跟唱结束，可选择重新录制或下一段'}
-                    </p>
-
-                    {/* 交互按钮区域 */}
-                    {shadowState === 'replaying' && (
-                      <button
-                        className="btn btn-secondary"
-                        onClick={handleCancelRetry}
-                      >
-                        ✕ 取消
-                      </button>
-                    )}
-
-                    {shadowState === 'countdown' && (
-                      <button
-                        className="btn btn-press-hold pressing"
-                        style={{ filter: 'hue-rotate(60deg)', color: '#ffffff', opacity: 1, cursor: 'default' }}
-                      >
-                        🎙 准备... {countdown}s
-                      </button>
-                    )}
-
-                    {shadowState === 'following' && (
-                      <button
-                        className="btn btn-press-hold btn-recording"
-                        onClick={handleStopShadowRecording}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        ⏹ 正在跟唱录音中... 点击停止
-                      </button>
-                    )}
-
-                    {(shadowState === 'idle' || shadowState === 'listening' || shadowState === 'following_done') && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
-                        <div className="controls-grid">
-                          {/* “再试一次”仅在 following_done 状态显示 */}
-                          {shadowState === 'following_done' && (
-                            <button
-                              className="btn btn-secondary"
-                              onClick={handleShadowRetry}
-                            >
-                              🔄 再试一次
-                            </button>
-                          )}
-
-                          {/* 始终保持挂载的长按主交互按钮 */}
-                          <button
-                            className={`btn btn-press-hold ${shadowState === 'listening' ? 'pressing' : ''}`}
-                            onMouseDown={handleShadowPressStart}
-                            onMouseUp={handleShadowPressEnd}
-                            onMouseLeave={(e) => { if (shadowStateRef.current === 'listening') handleShadowPressEnd(e); }}
-                            onTouchStart={handleShadowPressStart}
-                            onTouchEnd={handleShadowPressEnd}
-                            onTouchCancel={handleShadowPressEnd}
-                          >
-                            {shadowState === 'idle' && '🔊 按住播放'}
-                            {shadowState === 'listening' && '🔊 播放中…'}
-                            {shadowState === 'following_done' && '▶ 按住继续下一段'}
+                  <div className="shadow-controls-wrapper">
+                    <div className="shadow-panel-layout">
+                      {/* 左侧侧边动作区 */}
+                      <div className="shadow-panel-side left">
+                        {shadowState === 'replaying' && (
+                          <button className="btn btn-secondary shadow-side-btn" onClick={handleCancelRetry}>
+                            ✕ 取消
                           </button>
-                        </div>
+                        )}
+                        {shadowState === 'following_done' && (
+                          <button className="btn btn-secondary shadow-side-btn" onClick={handleShadowRetry}>
+                            🔄 重录
+                          </button>
+                        )}
+                      </div>
+
+                      {/* 中间主要圆形控制按钮 */}
+                      <div className="shadow-panel-center">
+                        <button
+                          className={`btn-circular-main state-${shadowState}`}
+                          onMouseDown={shadowState === 'idle' || shadowState === 'listening' || shadowState === 'following_done' ? handleShadowPressStart : undefined}
+                          onMouseUp={shadowState === 'listening' ? handleShadowPressEnd : undefined}
+                          onMouseLeave={shadowState === 'listening' ? (e) => { if (shadowStateRef.current === 'listening') handleShadowPressEnd(e); } : undefined}
+                          onTouchStart={shadowState === 'idle' || shadowState === 'listening' || shadowState === 'following_done' ? handleShadowPressStart : undefined}
+                          onTouchEnd={shadowState === 'listening' ? handleShadowPressEnd : undefined}
+                          onTouchCancel={shadowState === 'listening' ? handleShadowPressEnd : undefined}
+                          onClick={
+                            shadowState === 'following' ? handleStopShadowRecording : 
+                            shadowState === 'replaying' ? handleCancelRetry : undefined
+                          }
+                        >
+                          <div className="inner-content">
+                            {shadowState === 'idle' && (
+                              <>
+                                <span className="icon">🔊</span>
+                                <span className="text">按住播放</span>
+                              </>
+                            )}
+                            {shadowState === 'listening' && (
+                              <>
+                                <span className="icon">🔊</span>
+                                <span className="text">松开跟唱</span>
+                              </>
+                            )}
+                            {shadowState === 'countdown' && (
+                              <>
+                                <span className="count-num">{countdown}</span>
+                                <span className="text">准备中</span>
+                              </>
+                            )}
+                            {shadowState === 'following' && (
+                              <>
+                                <span className="rec-dot"></span>
+                                <span className="text">点击停止</span>
+                              </>
+                            )}
+                            {shadowState === 'following_done' && (
+                              <>
+                                <span className="icon">▶</span>
+                                <span className="text">继续下段</span>
+                              </>
+                            )}
+                            {shadowState === 'replaying' && (
+                              <>
+                                <span className="icon">🎧</span>
+                                <span className="text">播放中</span>
+                              </>
+                            )}
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* 右侧侧边动作区 */}
+                      <div className="shadow-panel-side right">
                         {hasShadowRecording && shadowState === 'following_done' && (
-                          <div className="controls-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             {isReplayingRecording ? (
-                              <button className="btn btn-danger" onClick={handleStopPlayback} style={{ width: '100%' }}>
-                                ⏹ 停止回放
+                              <button className="btn btn-danger shadow-side-btn" onClick={handleStopPlayback}>
+                                ⏹ 停止
                               </button>
                             ) : (
-                              <button className="btn btn-primary" onClick={handleStartPlayback} style={{ width: '100%' }}>
-                                🔊 回放上一段
+                              <button className="btn btn-primary shadow-side-btn" onClick={handleStartPlayback}>
+                                🔊 回放
                               </button>
                             )}
-                            <button className="btn btn-success" onClick={() => exportMixedAudio(true)} style={{ width: '100%' }}>
-                              💾 导出完整合成 (.wav)
+                            <button className="btn btn-success shadow-side-btn" onClick={() => exportMixedAudio(true)}>
+                              💾 导出
                             </button>
                           </div>
                         )}
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </>
