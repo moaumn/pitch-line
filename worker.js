@@ -236,13 +236,9 @@ self.onmessage = function (e) {
         const frame = realtimeBuffer.subarray(0, frameLen);
         let midi = estimatePitchYin(frame, SAMPLE_RATE);
         
-        // Dynamic octave-jump correction for real-time stream
+        // 实时音高流直接输出以保证极佳的响应速度与音程跨度 (Direct pass-through for best latency and instrument response)
         if (midi > 0) {
-          if (lastValidMidi > 0 && Math.abs(midi - lastValidMidi) > 15) {
-            midi = lastValidMidi;
-          } else {
-            lastValidMidi = midi;
-          }
+          lastValidMidi = midi;
         }
         
         self.postMessage({ type: 'frame_pitch', midi });
