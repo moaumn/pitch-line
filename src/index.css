@@ -19,19 +19,25 @@
   box-sizing: border-box;
 }
 
-body {
+html, body {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
+}
+
+body {
   background-color: var(--bg-color);
   background-image: 
     radial-gradient(at 10% 20%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
     radial-gradient(at 90% 80%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
   background-attachment: fixed;
-  min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  overflow-x: hidden;
 }
 
 #root {
@@ -221,8 +227,8 @@ p.subtitle {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
-  padding: 6px 12px;
-  margin-bottom: 12px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
   position: relative;
 }
 
@@ -242,7 +248,7 @@ p.subtitle {
   border-radius: 16px;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.3);
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
 
 .practice-container {
@@ -317,13 +323,13 @@ p.subtitle {
 .tab-bar {
   display: flex;
   border-bottom: 1px solid var(--panel-border);
-  margin-bottom: 12px;
+  margin-bottom: 4px;
 }
 
 .tab-item {
   flex: 1;
   text-align: center;
-  padding: 10px 0;
+  padding: 6px 0;
   font-size: 13px;
   font-weight: 700;
   color: var(--text-secondary);
@@ -599,7 +605,7 @@ p.subtitle {
   width: 100%;
   max-width: 480px;
   height: 96px;
-  margin: 10px auto;
+  margin: 0 auto;
   position: relative;
 }
 

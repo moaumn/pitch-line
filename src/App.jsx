@@ -109,9 +109,10 @@ export default function App() {
         const { midi } = e.data;
         if (midi > 0) {
           const currentRange = pitchRangeRef.current;
-          if (midi < currentRange.min) {
+          // 增加 2 个半音的安全缓冲区，防止音符线贴在画布绝对边缘导致截断
+          if (midi < currentRange.min + 2) {
             updatePitchRange({ min: Math.max(12, Math.floor(midi) - 3), max: currentRange.max });
-          } else if (midi > currentRange.max) {
+          } else if (midi > currentRange.max - 2) {
             updatePitchRange({ min: currentRange.min, max: Math.min(127, Math.ceil(midi) + 3) });
           }
         }
@@ -630,6 +631,8 @@ export default function App() {
   };
 
   const handleStopAll = () => {
+    const wasRecording = recordingRef.current;
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
@@ -655,7 +658,7 @@ export default function App() {
     setShadowRecording(false);
     shadowStateRef.current = 'idle';
     setShadowState('idle');
-    if (!isDetectionOnlyRef.current) {
+    if (!isDetectionOnlyRef.current && wasRecording) {
       calculateScore();
     }
   };
