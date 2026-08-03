@@ -1,16 +1,77 @@
-# React + Vite
+# PitchLine ── 智能音高检测与多轨跟唱对齐系统 🎶
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+> **基于 React + Vite 的流式 H5 级极速流音高训练与人声伴奏处理系统**
+>
+> 零服务器依赖，100% 纯客户端本地计算，支持移动端极速启动，针对 iOS 系统深度防压限与防弹性回弹调优。
 
-Currently, two official plugins are available:
+👉 **在线演示地址 (GitHub Pages)**: [https://moaumn.github.io/pitch-line/](https://moaumn.github.io/pitch-line/)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## 🌟 核心特性
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. 🎙️ 高级跟读（跟唱）与自动模式
+- **自动训练模式**：同步原唱/伴奏，按住录音并实时绘制音高对比，结束后自动分析音准并弹出得分轻提示。
+- **分段跟唱模式**：
+  - **听唱无缝切换**：长按按钮听原音，松开按钮进入 2 秒倒计时并开始跟唱当前区间。
+  - **回放上一段**：支持单独、同步回放上一段用户录音和伴奏区间的混合音频。
+  - **全分段合成导出**：跟唱结束后，一键合并所有已录制的音轨并与对应区间的伴奏缝合，合成高保真 `.wav` 导出。
 
-## Expanding the Oxlint configuration
+### 2. 🎯 零载入音高检测与智能 YIN 算法滤波
+- **免音频音高检测**：支持无音频上传一键直达“音高检测”，通过录音实时绘制虚拟时间轴，并随时间平滑向左滚动。
+- **自适应音域扩展**：主界面渲染区间支持自适应动态缩放。当音高超越当前的最高音或最低音（设置了 2 个半音的安全缓冲区）时，Y 轴格线和唱线渲染范围将即时自动扩容定位，防止线段截断。
+- **乐器级高敏捷检测**：去除黏滞死锁滤波，直通 YIN 算法测频响应极限，完美支持吉他换弦、钢琴等宽音域宽跨度音高测定。
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+### 3. 🎛️ 黄金交互中心与延迟寻轨 (Deferred Scrubbing)
+- **固定位置中心圆控制台**：跟唱控制面板使用对称三栏流式布局。中间主要控制按钮尺寸绝对固定，并在 `未唱`、`放音中`、`倒计时`、`录音中`、`回放中` 等不同状态下自适应演变色彩及动态微光效果，极大地提升了操作手感与容错率。
+- **双联动延迟寻轨**：顶部波形进度条与主屏幕完全联动，左右拖拽时音频不卡顿、不爆音，松手的一瞬间才调用 `setTime()` 精准跳转，极大避免了拉动进度条时的啸叫与断音。
+
+
+## 📂 项目结构
+
+```text
+├── public/
+│   ├── worker.js            # 音高分析 YIN 算法 Worker
+│   └── coi-serviceworker.js # 用于 GitHub Pages 的跨域隔离标头代理脚本
+├── src/
+│   ├── App.jsx              # 主应用交互及 Web Audio 渲染逻辑
+│   ├── index.css            # 核心样式系统（含中心圆控制台、微光动画）
+│   └── main.jsx
+├── index.html
+├── vite.config.js           # 注入 COOP/COEP 跨域头及 Worker 配置
+└── package.json
+```
+
+---
+
+## 🛠️ 本地运行指南
+
+1. **克隆项目并安装依赖**：
+   ```bash
+   git clone https://github.com/mujinmeng/pitch-line.git
+   cd pitch-line
+   npm install
+   ```
+
+2. **启动本地开发服务器**：
+   ```bash
+   npm run dev
+   ```
+
+3. **打包生产版本**：
+   ```bash
+   npm run build
+   ```
+
+---
+
+## 🌐 静态部署建议 (GitHub Pages)
+
+项目支持以纯静态资源的形式托管在 GitHub Pages 上。由于引入了多线程和 `SharedArrayBuffer`，在非同源隔离环境下浏览器可能会有限制。
+
+---
+
+## 📝 混音导出优化说明
+- 导出的 WAV 文件已降低采样率至 **22050Hz 单声道 (Mono)**。
+- 导出的音频大小缩小了 **4 倍**，更适合在移动端、Web 环境下快速传输。
+- 导出的音频**严格剔成了伴奏干声中原本的歌手原唱人声音轨**（只包含你的录音人声 + 纯伴奏音乐），并且按你练习的真实截止点进行了**时值自动剪裁**，杜绝多余的静音。
